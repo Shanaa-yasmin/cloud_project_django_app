@@ -1,0 +1,62 @@
+name: SSRF Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # allows manually triggering a run from the Actions tab
+
+jobs:
+  ssrf-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run SSRF scan against target
+        env:
+          # Set this as a GitHub Actions secret (Settings > Secrets and
+          # variables > Actions) rather than hardcoding it here, so the
+          # target URL isn't exposed in the workflow file itself.
+          TARGET_BASE: ${{ secrets.SCAN_TARGET_BASE }}
+        run: python scanner.py
+
+      - name: Check for critical findings
+        run: |
+          python - <<'EOF'
+          import json
+          import sys
+
+          with open("scan_results.json") as f:
+              data = json.load(f)
+
+          critical_findings = [
+              f for f in data.get("findings", [])
+              if f.get("severity") == "critical"
+          ]
+
+          if critical_findings:
+              print(f"::error::{len(critical_findings)} critical finding(s) detected — build failed.")
+              for finding in critical_findings:
+                  print(f"  - {finding.get('url')} (param={finding.get('param')})")
+              sys.exit(1)
+          else:
+              print("No critical findings. Scan passed.")
+          EOF
+
+      - name: Upload scan results as artifact
+        if: always()  # upload even if the scan step above failed the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results
+          path: scan_results.json
