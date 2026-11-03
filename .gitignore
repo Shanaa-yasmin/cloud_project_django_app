@@ -44,6 +44,14 @@ media/
 .env
 .env.*
 
+# Project scan/analysis output — contains real account IDs, ARNs, and
+# instance details from your own AWS sandbox; keep sanitized samples
+# instead if you want example output checked in
+scan_results.json
+blast_radius_results.json
+remediation_imds_results.json
+remediation_iam_results.json
+
 # IDEs
 .vscode/
 .idea/
