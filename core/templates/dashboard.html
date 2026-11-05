@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlastRadius — SSRF Cloud Security Pipeline</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+    <style>
+        :root {
+            --bg: #0b0e14;
+            --panel: #121622;
+            --panel-border: #232a3b;
+            --text: #e6e9f0;
+            --text-dim: #8b93a7;
+            --accent: #5b8cff;
+            --critical: #ff5470;
+            --high: #ff9f45;
+            --medium: #ffd166;
+            --low: #4cd4a0;
+            --info: #6b7385;
+            --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .app {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 24px 80px;
+        }
+
+        header {
+            margin-bottom: 36px;
+        }
+
+        header h1 {
+            font-size: 28px;
+            margin: 0 0 6px;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        header h1 .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent);
+            display: inline-block;
+        }
+
+        header p {
+            color: var(--text-dim);
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .tab {
+            padding: 10px 18px;
+            cursor: pointer;
+            color: var(--text-dim);
+            font-size: 14px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .tab.active {
+            color: var(--text);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab:hover {
+            color: var(--text);
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 22px;
+            margin-bottom: 16px;
+        }
+
+        .panel h2 {
+            font-size: 15px;
+            margin: 0 0 14px;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .panel h2 .sub {
+            color: var(--text-dim);
+            font-weight: 400;
+            font-size: 13px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .badge.critical {
+            background: rgba(255, 84, 112, 0.15);
+            color: var(--critical);
+        }
+
+        .badge.high {
+            background: rgba(255, 159, 69, 0.15);
+            color: var(--high);
+        }
+
+        .badge.medium {
+            background: rgba(255, 209, 102, 0.15);
+            color: var(--medium);
+        }
+
+        .badge.low {
+            background: rgba(76, 212, 160, 0.15);
+            color: var(--low);
+        }
+
+        .badge.info {
+            background: rgba(107, 115, 133, 0.15);
+            color: var(--info);
+        }
+
+        .finding-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .finding-row:last-child {
+            border-bottom: none;
+        }
+
+        .finding-main {
+            flex: 1;
+        }
+
+        .finding-url {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+            word-break: break-all;
+        }
+
+        .finding-detail {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+
+        .kv-grid {
+            display: grid;
+            grid-template-columns: 160px 1fr;
+            gap: 8px 16px;
+            font-size: 13px;
+        }
+
+        .kv-grid dt {
+            color: var(--text-dim);
+        }
+
+        .kv-grid dd {
+            margin: 0;
+            font-family: var(--mono);
+            color: var(--text);
+            word-break: break-all;
+        }
+
+        .action-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .action-chip {
+            font-family: var(--mono);
+            font-size: 11px;
+            background: rgba(91, 140, 255, 0.1);
+            color: var(--accent);
+            padding: 3px 8px;
+            border-radius: 5px;
+        }
+
+        .score-box {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .score-number {
+            font-size: 36px;
+            font-weight: 700;
+            font-family: var(--mono);
+        }
+
+        .score-label {
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+
+        pre.code-block {
+            background: #080a10;
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 14px;
+            font-size: 12px;
+            overflow-x: auto;
+            color: #a3e3c4;
+            font-family: var(--mono);
+        }
+
+        .empty-state {
+            color: var(--text-dim);
+            font-size: 13px;
+            padding: 30px 0;
+            text-align: center;
+        }
+
+        .loading {
+            color: var(--text-dim);
+            font-size: 13px;
+        }
+
+        .diff-wrap {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .diff-col h4 {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin: 0 0 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function useJson(url) {
+            const [state, setState] = useState({ loading: true, data: null, error: null });
+            useEffect(() => {
+                fetch(url)
+                    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                    .then(({ ok, data }) => {
+                        if (!ok) setState({ loading: false, data: null, error: data.error || "Unknown error" });
+                        else setState({ loading: false, data, error: null });
+                    })
+                    .catch(err => setState({ loading: false, data: null, error: String(err) }));
+            }, [url]);
+            return state;
+        }
+
+        function Badge({ severity }) {
+            const level = (severity || "info").toLowerCase();
+            return <span className={`badge ${level}`}>{level}</span>;
+        }
+
+        function ScanPanel() {
+            const { loading, data, error } = useJson("/api/scan-results/");
+            if (loading) return <div className="panel"><p className="loading">Loading scan results…</p></div>;
+            if (error) return <div className="panel"><p className="empty-state">{error}</p></div>;
+
+            const findings = data.findings || [];
+
+            return (
+                <div className="panel">
+                    <h2>Scan Findings <span className="sub">— {data.target_base}</span></h2>
+                    {findings.length === 0 && <p className="empty-state">No findings.</p>}
+                    {findings.map((f, i) => (
+                        <div className="finding-row" key={i}>
+                            <div className="finding-main">
+                                {f.url && <div className="finding-url">{f.url}{f.param ? `?${f.param}=...` : ""}</div>}
+                                {f.note && <div className="finding-detail">{f.note}</div>}
+                                {f.metadata_check && (
+                                    <div className="finding-detail">
+                                        Metadata reachable: {String(f.metadata_check.metadata_reachable)}
+                                        {f.metadata_check.role_name && ` · Role: ${f.metadata_check.role_name}`}
+                                        {f.metadata_check.imds_version_detected && ` · ${f.metadata_check.imds_version_detected}`}
+                                    </div>
+                                )}
+                                {f.internal_network_reachable !== undefined && (
+                                    <div className="finding-detail">Internal network reachable: {String(f.internal_network_reachable)}</div>
+                                )}
+                            </div>
+                            <Badge severity={f.severity} />
+                        </div>
+                    ))}
+                    <div className="finding-detail" style={{ marginTop: 12 }}>
+                        Scanned: {new Date(data.scan_timestamp).toLocaleString()}
+                    </div>
+                </div>
+            );
+        }
+
+        function BlastRadiusPanel() {
+            const { loading, data, error } = useJson("/api/blast-radius/");
+            if (loading) return <div className="panel"><p className="loading">Loading blast-radius analysis…</p></div>;
+            if (error) return <div className="panel"><p className="empty-state">{error}</p></div>;
+
+            const risk = data.risk_assessment || {};
+
+            return (
+                <div className="panel">
+                    <h2>Blast-Radius Analysis <span className="sub">— stolen credential impact</span></h2>
+
+                    <div className="score-box">
+                        <div>
+                            <div className="score-number">{risk.score ?? "—"}</div>
+                            <div className="score-label">risk score</div>
+                        </div>
+                        <Badge severity={risk.level} />
+                    </div>
+
+                    <dl className="kv-grid">
+                        <dt>Exploited identity</dt><dd>{data.stolen_identity_arn}</dd>
+                        <dt>Attached policies</dt><dd>{(data.attached_managed_policies || []).join(", ") || "—"}</dd>
+                        <dt>Inline policies</dt><dd>{(data.inline_policies || []).join(", ") || "—"}</dd>
+                        <dt>Credential expires</dt><dd>{data.credential_expiration}</dd>
+                    </dl>
+
+                    <h4 style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 16, marginBottom: 6 }}>Allowed actions</h4>
+                    <div className="action-list">
+                        {(data.allowed_actions || []).length === 0 && <span className="finding-detail">None</span>}
+                        {(data.allowed_actions || []).map((a, i) => <span className="action-chip" key={i}>{a}</span>)}
+                    </div>
+
+                    {risk.reasons && risk.reasons.length > 0 && (
+                        <>
+                            <h4 style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 16, marginBottom: 6 }}>Risk reasoning</h4>
+                            {risk.reasons.map((r, i) => <div className="finding-detail" key={i}>• {r}</div>)}
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        function RemediationPanel() {
+            const imds = useJson("/api/remediation/imds/");
+            const iam = useJson("/api/remediation/iam/");
+
+            return (
+                <div className="panel">
+                    <h2>Remediation</h2>
+
+                    <h4 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>IMDSv2 Enforcement</h4>
+                    {imds.loading && <p className="loading">Loading…</p>}
+                    {imds.error && <p className="empty-state">{imds.error}</p>}
+                    {imds.data && (
+                        <div style={{ marginBottom: 20 }}>
+                            <Badge severity={imds.data.severity} />
+                            <p className="finding-detail" style={{ marginTop: 8 }}>{imds.data.message}</p>
+                            {imds.data.remediation && (
+                                <pre className="code-block">{imds.data.remediation.cli_command}</pre>
+                            )}
+                        </div>
+                    )}
+
+                    <h4 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>IAM Least-Privilege (AWS Access Analyzer)</h4>
+                    {iam.loading && <p className="loading">Loading…</p>}
+                    {iam.error && (
+                        <p className="empty-state">
+                            Not available — integration built and documented; AWS's layered
+                            cross-service permission requirements (identity policy, bucket
+                            resource policy, and possibly CloudTrail data events) were not
+                            fully resolved in this environment.
+                        </p>
+                    )}
+                    {iam.data && (
+                        <div className="diff-wrap">
+                            <div className="diff-col">
+                                <h4>Current</h4>
+                                <pre className="code-block">{JSON.stringify(iam.data.current_policies, null, 2)}</pre>
+                            </div>
+                            <div className="diff-col">
+                                <h4>Recommended</h4>
+                                <pre className="code-block">{JSON.stringify(iam.data.recommended_policies, null, 2)}</pre>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function App() {
+            const [tab, setTab] = useState("scan");
+            const tabs = [
+                { id: "scan", label: "Scan" },
+                { id: "blast", label: "Blast Radius" },
+                { id: "remediation", label: "Remediation" },
+            ];
+
+            return (
+                <div className="app">
+                    <header>
+                        <h1><span className="dot"></span>BlastRadius</h1>
+                        <p>SSRF-to-cloud-metadata detection, impact analysis, and remediation pipeline</p>
+                    </header>
+
+                    <div className="tabs">
+                        {tabs.map(t => (
+                            <div key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+                                {t.label}
+                            </div>
+                        ))}
+                    </div>
+
+                    {tab === "scan" && <ScanPanel />}
+                    {tab === "blast" && <BlastRadiusPanel />}
+                    {tab === "remediation" && <RemediationPanel />}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+
+</html>

